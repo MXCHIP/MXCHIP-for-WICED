@@ -18,13 +18,13 @@
 * Replace the same files in the `WICED-SDK\tools\OpenOCD` folder with the file in the `patchs\OpenOCD` folder. 
 
 ###Then
-* Change into the SDK directory with the command: `cd WICED-SDK-3.5.2`
-* Test flashing an application to the module.Enter the WICED-SDK-3.5.2 directory and run something like `./make EMW<module no>-<app-dir>.<app-name> download run JTAG=<jtag-adapter>` to compile and flash.The followings are examples for EMW3162 and EMW3165.
+* Enter the WICED-SDK-3.5.2 SDK directory with the command: `cd WICED-SDK-3.5.2`
+* Test flashing an application to the module. In SDK directory, you need run something like `./make EMW<module no>-<app-dir>.<app-name> download run JTAG=<jtag-adapter>` to compile and flash.The followings are examples for EMW3162 and EMW3165.
 
-For EMW3162, using stlink-v2 for flashing, using the application *scan* from the *snip* directory, you should run git command like this:
+For EMW3162, using stlink-v2 for flashing, using the application *scan* from the *snip* directory, you should run command like this:
 `./make EMW3162-snip.scan download run JTAG=stlink-v2`
 
-For EMW3165, using stlink-v2 for flashing, using the application *scan* from the *snip* directory, you should run git command like this:
+For EMW3165, using stlink-v2 for flashing, using the application *scan* from the *snip* directory, you should run command like this:
 `./make EMW3165-snip.scan download run JTAG=stlink-v2`
 
 You may need to reset modules after flashing process while using st-link-v2.
