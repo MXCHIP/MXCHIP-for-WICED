@@ -3,6 +3,8 @@
 
 *Use sales@mxchip.com to contact MXCHIP*
 
+
+
 ##Using Method
 ###Preparations
 * Download WICED-SDK-3.5.2 in `WICED-WIFI` plate of www.broadcom.com . First you need to register to be a member of their website **with what Broadcom calls a "corporate" e-mail address, so you can't use GMail, Outlook.com or other such e-mail addresses**.
