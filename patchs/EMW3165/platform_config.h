@@ -39,7 +39,7 @@ extern "C" {
 #define WICED_USE_WIFI_RESET_PIN
 
 /* */
-#define WICED_USE_WIFI_32K_CLOCK_MCO
+//#define WICED_USE_WIFI_32K_CLOCK_MCO
 
 /*  OTA */
 #define PLATFORM_HAS_OTA
