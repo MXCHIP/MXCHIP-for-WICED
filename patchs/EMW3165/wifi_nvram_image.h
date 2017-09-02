@@ -1,6 +1,16 @@
+/**
+ *  UNPUBLISHED PROPRIETARY SOURCE CODE
+ *  Copyright (c) 2016 MXCHIP Inc.
+ *
+ *  The contents of this file may not be disclosed to third parties, copied or
+ *  duplicated in any form, in whole or in part, without the prior written
+ *  permission of MXCHIP Corporation.
+ *
+ */
+
 /** @file
- *  NVRAM variables which define BCM43362 Parameters for the
- *  USI module used on the EMW3165 board
+ *  NVRAM variables which define BCM43362 Parameters for the 
+ *  MXCHIP EMW3165 module.
  *
  */
 
@@ -8,12 +18,8 @@
 #define INCLUDED_NVRAM_IMAGE_H_
 
 #include <string.h>
-#include <stdint.h>
-#include "../generated_mac_address.txt"
 
-#ifdef __cplusplus
-extern "C" {
-#endif
+#define NVRAM_GENERATED_MAC_ADDRESS   "macaddr=C8:93:46:00:00:01"
 
 /**
  * Character array of NVRAM image
@@ -24,24 +30,24 @@ static const char wifi_nvram_image[] =
         "prodid=0x492"                                                       "\x00"
         "vendid=0x14e4"                                                      "\x00"
         "devid=0x4343"                                                       "\x00"
-        "boardtype=0x05a0"                                                   "\x00"
-        "boardrev=0x1301"                                                    "\x00" /*Board Revision is REV3.1*/
+        "boardtype=0x0598"                                                   "\x00"
+        "boardrev=0x1309"                                                    "\x00"
         "boardnum=777"                                                       "\x00"
         "xtalfreq=26000"                                                     "\x00"
         "boardflags=0xa00"                                                   "\x00"
         "sromrev=3"                                                          "\x00"
         "wl0id=0x431b"                                                       "\x00"
         NVRAM_GENERATED_MAC_ADDRESS                                          "\x00"
-        "aa2g=3"                                                             "\x00"
+        "aa2g=1"                                                             "\x00"
         "ag0=2"                                                              "\x00"
-        "maxp2ga0=68"                                                        "\x00"
-        "ofdm2gpo=0x44444444"                                                "\x00"
-        "mcs2gpo0=0x3333"                                                    "\x00"
-        "mcs2gpo1=0x6333"                                                    "\x00"
+        "maxp2ga0=72"                                                        "\x00"
+        "ofdm2gpo=0x77777777"                                                "\x00"
+        "mcs2gpo0=0x9999"                                                    "\x00"
+        "mcs2gpo1=0x9999"                                                    "\x00"
         "pa0maxpwr=80"                                                       "\x00"
-        "pa0b0=0x133E"                                                       "\x00"
-        "pa0b1=0xFDBA"                                                       "\x00"
-        "pa0b2=0xFF53"                                                       "\x00"
+        "pa0b0=0x14BC"                                                       "\x00"
+        "pa0b1=0xFD48"                                                       "\x00"
+        "pa0b2=0xFF15"                                                       "\x00"
         "pa0itssit=62"                                                       "\x00"
         "pa1itssit=62"                                                       "\x00"
         "temp_based_dutycy_en=1"                                             "\x00"
@@ -64,9 +70,9 @@ static const char wifi_nvram_image[] =
         "rssisav2g=0x7"                                                      "\x00"
         "triso2g=0"                                                          "\x00"
         "noise_cal_enable_2g=0"                                              "\x00"
-        "noise_cal_po_2g=0"                                                  "\x00"
-        "noise_cal_po_2g.fab.3=-2"                                           "\x00"
-        "swctrlmap_2g=0x050c050c,0x030a030a,0x030a030a,0x0,0x1ff"            "\x00"
+        "noise_cal_po_2g=1"                                                  "\x00"
+        "noise_cal_po_2g.fab.3=4"                                            "\x00"
+        "swctrlmap_2g=0x04040404,0x02020202,0x02020202,0x010101,0x1ff"       "\x00"
         "temp_add=29767"                                                     "\x00"
         "temp_mult=425"                                                      "\x00"
         "temp_q=10"                                                          "\x00"
@@ -76,14 +82,11 @@ static const char wifi_nvram_image[] =
         "rfreg033_cck=0x1f"                                                  "\x00"
         "cckPwrIdxCorr=-8"                                                   "\x00"
         "spuravoid_enable2g=1"                                               "\x00"
-        "edonthd=-70"                                                        "\x00"
-        "edoffthd=-76"                                                       "\x00"
-        "\x00\x00";
-
-
-#ifdef __cplusplus
-} /* extern "C" */
-#endif
+        "noise_cal_dbg.fab.3=1"                                              "\x00"
+        "logen_mode=0x0,0x02,0x1b,0x0,0x1b"                                  "\x00"
+        "noise_cal_high_gain.fab.3=76"                                       "\x00"
+        "noise_cal_nf_substract_val.fab.3=356"                               "\x00"
+        "\x00\x00";   
 
 #else /* ifndef INCLUDED_NVRAM_IMAGE_H_ */
 

@@ -11,10 +11,11 @@ extern "C" {
 #define APB1_CLOCK_DIVIDER      ( RCC_HCLK_Div2 )
 #define APB2_CLOCK_DIVIDER      ( RCC_HCLK_Div1 )
 #define PLL_SOURCE              ( RCC_PLLSource_HSE )
-#define PLL_M_CONSTANT          26                       /* PLLM = 16                            */
-#define PLL_N_CONSTANT          400                      /* PLLN = 400                           */
-#define PLL_P_CONSTANT          4                        /* PLLP = 4                             */
-#define PLL_Q_CONSTANT          7                        /* PLLQ = 7                             */
+#define PLL_M_CONSTANT          ( 26 )
+#define PLL_N_CONSTANT          ( 200 )
+#define PLL_P_CONSTANT          ( 2 )
+#define PLL_Q_CONSTANT          ( 4 )
+#define PLL_R_CONSTANT          2                        /* PLLR = 2                             */
 #define SYSTEM_CLOCK_SOURCE     ( RCC_SYSCLKSource_PLLCLK )
 #define SYSTICK_CLOCK_SOURCE    ( SysTick_CLKSource_HCLK )
 #define INT_FLASH_WAIT_STATE    ( FLASH_Latency_3 )

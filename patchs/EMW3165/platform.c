@@ -11,8 +11,6 @@
 /******************************************************
  *                      Macros
  ******************************************************/
-#define PLATFORM_FACTORY_RESET_CHECK_PERIOD     ( 100 )
-#define PLATFORM_FACTORY_RESET_TIMEOUT          ( 5000 )
 
 /******************************************************
  *                    Constants
@@ -444,7 +442,7 @@ void platform_init_peripheral_irq_priorities( void )
     NVIC_SetPriority( RTC_WKUP_IRQn    ,  1 ); /* RTC Wake-up event   */
     NVIC_SetPriority( SDIO_IRQn        ,  2 ); /* WLAN SDIO           */
     NVIC_SetPriority( DMA2_Stream3_IRQn,  3 ); /* WLAN SDIO DMA       */
-    NVIC_SetPriority( DMA1_Stream3_IRQn,  3 ); /* WLAN SPI DMA        */
+//    NVIC_SetPriority( DMA1_Stream3_IRQn,  3 ); /* WLAN SPI DMA        */
     NVIC_SetPriority( USART1_IRQn      ,  6 ); /* WICED_UART_1        */
     NVIC_SetPriority( USART2_IRQn      ,  6 ); /* WICED_UART_2        */
     NVIC_SetPriority( DMA2_Stream7_IRQn,  7 ); /* WICED_UART_1 TX DMA */
@@ -505,7 +503,7 @@ wiced_bool_t platform_check_factory_reset( void )
 #ifndef GPIO_LED_NOT_SUPPORTED
     int led_state = 0;
 #endif
-
+    
     while (  ( 0 == platform_gpio_input_get( &platform_gpio_pins[ WICED_BUTTON1 ] ) )
            &&( ( factory_reset_counter += PLATFORM_FACTORY_RESET_CHECK_PERIOD ) <= PLATFORM_FACTORY_RESET_TIMEOUT )
            &&( WICED_SUCCESS == (wiced_result_t)host_rtos_delay_milliseconds( PLATFORM_FACTORY_RESET_CHECK_PERIOD ) )
