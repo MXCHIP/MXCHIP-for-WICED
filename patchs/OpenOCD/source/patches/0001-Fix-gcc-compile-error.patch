@@ -1,0 +1,48 @@
+From 5bd0c7db405eeab9179547cc802c892ed2f7cdf0 Mon Sep 17 00:00:00 2001
+From: Broadcom Wiced <broadcom_wiced@broadcom.local>
+Date: Wed, 17 Aug 2016 12:30:11 -0700
+Subject: [PATCH] Fix gcc compile error.
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Fixed in newer OpenOCD:
+arm7: add missing braces around an if()
+Spotted by gcc:
+arm7_9_common.c: In function ‘arm7_9_unset_breakpoint’:
+arm7_9_common.c:353:4: error: this ‘if’ clause does not guard... [-Werror=misleading-indentation]
+if (current_instr == arm7_9->thumb_bkpt)
+^~
+arm7_9_common.c:356:5: note: ...this statement, but the latter is misleadingly indented as if it is guarded by the ‘if’
+if (retval != ERROR_OK)
+^~
+The logic won't change once the braces have been added, as the new 'retval'
+check only makes sense within the if().
+
+Signed-off-by: Broadcom Wiced <broadcom_wiced@broadcom.local>
+---
+ src/target/arm7_9_common.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/src/target/arm7_9_common.c b/src/target/arm7_9_common.c
+index 7b40f50..75cfa1a 100644
+--- a/src/target/arm7_9_common.c
++++ b/src/target/arm7_9_common.c
+@@ -350,12 +350,12 @@ static int arm7_9_unset_breakpoint(struct target *target, struct breakpoint *bre
+ 			if (retval != ERROR_OK)
+ 				return retval;
+ 			current_instr = target_buffer_get_u16(target, (uint8_t *)&current_instr);
+-			if (current_instr == arm7_9->thumb_bkpt)
++			if (current_instr == arm7_9->thumb_bkpt) {
+ 				retval = target_write_memory(target,
+ 						breakpoint->address, 2, 1, breakpoint->orig_instr);
+ 				if (retval != ERROR_OK)
+ 					return retval;
+-
++			}
+ 		}
+ 
+ 		if (--arm7_9->sw_breakpoint_count == 0) {
+-- 
+1.9.4.msysgit.0
+

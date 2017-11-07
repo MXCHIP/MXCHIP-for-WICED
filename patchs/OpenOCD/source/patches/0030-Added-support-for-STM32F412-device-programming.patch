@@ -1,0 +1,33 @@
+From 70b7c87f1e3d914fc9ce17c52291d433c55e473e Mon Sep 17 00:00:00 2001
+From: Broadcom Wiced <broadcom_wiced@broadcom.local>
+Date: Thu, 29 Oct 2015 22:40:36 +0800
+Subject: [PATCH] Adding support for the STM32F412 MCU with 1MB of Flash max
+
+Signed-off-by: Broadcom Wiced <broadcom_wiced@broadcom.local>
+---
+ src/flash/nor/stm32f2x.c | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/src/flash/nor/stm32f2x.c b/src/flash/nor/stm32f2x.c
+index 8dea951..368ff29 100644
+--- a/src/flash/nor/stm32f2x.c
++++ b/src/flash/nor/stm32f2x.c
+@@ -771,6 +771,7 @@ static int stm32x_probe(struct flash_bank *bank)
+ 	switch (device_id & 0xfff) {
+ 	case 0x411:
+ 	case 0x413:
++	case 0x441:
+ 		max_flash_size_in_kb = 1024;
+ 		break;
+ 	case 0x419:
+@@ -950,6 +951,7 @@ static int get_stm32x_info(struct flash_bank *bank, char *buf, int buf_size)
+ 	case 0x423:
+ 	case 0x431:
+ 	case 0x433:
++	case 0x441:
+ 		device_str = "STM32F4xx (Low Power)";
+ 
+ 		switch (rev_id) {
+-- 
+2.1.4
+

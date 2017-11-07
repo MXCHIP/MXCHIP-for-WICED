@@ -1,0 +1,26 @@
+From 431865a2631ae07a1058c423df0c1911359f457f Mon Sep 17 00:00:00 2001
+From: Evan Hunter <ehunter@broadcom.com>
+Date: Mon, 11 Jan 2016 17:35:15 +0000
+Subject: [PATCH] attributes: Fix MSYS2 compilation - It does not define _WIN32
+ and does not support attribute "hidden"
+
+---
+ libjaylink/libjaylink-internal.h | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/libjaylink/libjaylink-internal.h b/libjaylink/libjaylink-internal.h
+index dc335b2..d2b720c 100644
+--- a/libjaylink/libjaylink-internal.h
++++ b/libjaylink/libjaylink-internal.h
+@@ -34,7 +34,7 @@
+  */
+ 
+ /** Macro to mark private libjaylink symbol. */
+-#ifndef _WIN32
++#if (!defined(_WIN32)) && (!defined(__MSYS__))
+ #define JAYLINK_PRIV __attribute__ ((visibility ("hidden")))
+ #else
+ #define JAYLINK_PRIV
+-- 
+1.9.5.msysgit.0
+

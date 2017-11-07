@@ -1,0 +1,681 @@
+From 9eee69de0584c66c73b937dad7abe806435b68a7 Mon Sep 17 00:00:00 2001
+From: Broadcom Wiced <broadcom_wiced@broadcom.local>
+Date: Tue, 12 Jan 2016 14:37:42 -0800
+Subject: [PATCH] Add NuttX RTOS awareness.
+
+---
+ src/rtos/Makefile.am            |   4 +-
+ src/rtos/NuttX.c                | 524 ++++++++++++++++++++++++++++++++++++++++
+ src/rtos/rtos.c                 |   2 +
+ src/rtos/rtos_nuttx_stackings.c |  53 ++++
+ src/rtos/rtos_nuttx_stackings.h |  32 +++
+ 6 files changed, 614 insertions(+), 3 deletions(-)
+ create mode 100644 src/rtos/NuttX.c
+ create mode 100644 src/rtos/rtos_nuttx_stackings.c
+ create mode 100644 src/rtos/rtos_nuttx_stackings.h
+
+diff --git a/src/rtos/Makefile.am b/src/rtos/Makefile.am
+index 62293ec..4e896db 100644
+--- a/src/rtos/Makefile.am
++++ b/src/rtos/Makefile.am
+@@ -22,8 +22,8 @@ include $(top_srcdir)/common.mk
+ 
+ METASOURCES = AUTO
+ noinst_LTLIBRARIES = librtos.la
+-noinst_HEADERS = rtos.h rtos_standard_stackings.h rtos_ecos_stackings.h linux_header.h rtos_chibios_stackings.h rtos_embkernel_stackings.h rtos_mqx_stackings.h
+-librtos_la_SOURCES = rtos.c rtos_standard_stackings.c rtos_ecos_stackings.c  rtos_chibios_stackings.c rtos_embkernel_stackings.c rtos_mqx_stackings.c FreeRTOS.c ThreadX.c eCos.c linux.c ChibiOS.c embKernel.c mqx.c
++noinst_HEADERS = rtos.h rtos_standard_stackings.h rtos_ecos_stackings.h linux_header.h rtos_chibios_stackings.h rtos_embkernel_stackings.h rtos_mqx_stackings.h rtos_nuttx_stackings.h
++librtos_la_SOURCES = rtos.c rtos_standard_stackings.c rtos_ecos_stackings.c  rtos_chibios_stackings.c rtos_embkernel_stackings.c rtos_mqx_stackings.c rtos_nuttx_stackings.c FreeRTOS.c ThreadX.c eCos.c linux.c ChibiOS.c embKernel.c mqx.c NuttX.c
+ 
+ librtos_la_CFLAGS =
+ if IS_MINGW
+diff --git a/src/rtos/NuttX.c b/src/rtos/NuttX.c
+new file mode 100644
+index 0000000..416bc9e
+--- /dev/null
++++ b/src/rtos/NuttX.c
+@@ -0,0 +1,524 @@
++/***************************************************************************
++ *   Copyright (C) 2016 by Broadcom Corporation                            *
++ *   Ted Carter - tcarter@broadcom.com                                     *
++ *                                                                         *
++ *   This program is free software; you can redistribute it and/or modify  *
++ *   it under the terms of the GNU General Public License as published by  *
++ *   the Free Software Foundation; either version 2 of the License, or     *
++ *   (at your option) any later version.                                   *
++ *                                                                         *
++ *   This program is distributed in the hope that it will be useful,       *
++ *   but WITHOUT ANY WARRANTY; without even the implied warranty of        *
++ *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the         *
++ *   GNU General Public License for more details.                          *
++ *                                                                         *
++ *   You should have received a copy of the GNU General Public License     *
++ *   along with this program; if not, write to the                         *
++ *   Free Software Foundation, Inc.,                                       *
++ *   51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.           *
++ ***************************************************************************/
++
++#ifdef HAVE_CONFIG_H
++#include "config.h"
++#endif
++
++#include <helper/time_support.h>
++#include <jtag/jtag.h>
++#include "target/target.h"
++#include "target/target_type.h"
++#include "rtos.h"
++#include "helper/log.h"
++#include "helper/types.h"
++#include "rtos_nuttx_stackings.h"
++
++#define NUTTX_MAGIC							"NXDB"
++#define NUTTX_DB_QUEUE_S_HEAD_OFFSET		0
++#define NUTTX_TCB_S_FLINK_OFFSET			0
++
++#define NUTTX_TSTATE_TASK_PENDING_STRZ		"TSTATE_TASK_PENDING"
++#define NUTTX_TSTATE_TASK_READYTORUN_STRZ	"TSTATE_TASK_READYTORUN"
++#define NUTTX_TSTATE_TASK_RUNNING_STRZ		"TSTATE_TASK_RUNNING"
++#define NUTTX_TSTATE_TASK_INACTIVE_STRZ		"TSTATE_TASK_INACTIVE"
++#define NUTTX_TSTATE_WAIT_SEM_STRZ			"TSTATE_WAIT_SEM"
++#define NUTTX_TSTATE_WAIT_SIG_STRZ			"TSTATE_WAIT_SIG"
++#define NUTTX_TSTATE_WAIT_MQNOTEMPTY_STRZ	"TSTATE_WAIT_MQNOTEMPTY"
++#define NUTTX_TSTATE_WAIT_MQNOTFULL_STRZ	"TSTATE_WAIT_MQNOTFULL"
++#define NUTTX_TSTATE_WAIT_PAGEFILL_STRZ		"TSTATE_WAIT_PAGEFILL"
++
++static int NuttX_detect_rtos(struct target *target);
++static int NuttX_create(struct target *target);
++static int NuttX_update_threads(struct rtos *rtos);
++static int NuttX_get_thread_reg_list(struct rtos *rtos, int64_t thread_id, char **hex_reg_list);
++static int NuttX_get_symbol_list_to_lookup(symbol_table_elem_t *symbol_list[]);
++static int NuttX_wipe(struct rtos *rtos);
++
++/* Must match corresponding NuttX structure. */
++struct NuttX_dsb {
++	char magic[4];
++	uint8_t rsvd[4];
++	uint8_t size;
++	uint8_t tcb_s_xcp_reg_ofs;
++	uint8_t tcb_s_state_ofs;
++	uint8_t tcb_s_name_ofs;
++};
++
++struct NuttX_params {
++	const char *target_name;
++	unsigned char pointer_width;
++	struct NuttX_dsb *dsb;
++	const struct rtos_register_stacking *stacking_info;
++};
++
++static struct NuttX_params NuttX_params_list[] = {
++	{
++	"cortex_r4",				/* target_name */
++	4,							/* pointer_width; */
++	NULL,						/* dsb */
++	&nuttx_Cortex_R4_stacking,	/* stacking_info */
++	},
++};
++
++#define NUTTX_NUM_PARAMS ((int)(sizeof(NuttX_params_list)/sizeof(struct NuttX_params)))
++
++/*                 ( symbol                  optional  wipe ) */
++#define NUTTX_SYM_ENTRIES \
++	NUTTX_SYM_ENTRY( g_pendingtasks,         false,    true ) \
++	NUTTX_SYM_ENTRY( g_readytorun,           false,    true ) \
++	NUTTX_SYM_ENTRY( g_inactivetasks,        false,    true ) \
++	NUTTX_SYM_ENTRY( g_waitingforsemaphore,  false,    true ) \
++	NUTTX_SYM_ENTRY( g_waitingforsignal,     true,     true )  \
++	NUTTX_SYM_ENTRY( g_waitingformqnotempty, true,     true )  \
++	NUTTX_SYM_ENTRY( g_waitingformqnotfull,  true,     true )  \
++	NUTTX_SYM_ENTRY( g_waitingforfill,       true,     true )  \
++	NUTTX_SYM_ENTRY( g_dsb,                  false,    false)
++
++/* Symbol lookup values will be NuttX_VAL_XXX */
++#define NUTTX_SYM_ENTRY(_SYM_, _OPTIONAL_, _WIPE_) NuttX_VAL_ ##_SYM_,
++enum NuttX_symbol_values { NUTTX_SYM_ENTRIES NuttX_VAL_LAST };
++#undef NUTTX_SYM_ENTRY
++
++struct NuttX_symbol_list {
++	const char *name;
++	bool optional;
++	bool wipe;
++};
++
++/* Symbol list has a terminating entry. */
++#define NUTTX_SYM_ENTRY(_SYM_, _OPTIONAL_, _WIPE_) { #_SYM_, _OPTIONAL_, _WIPE_ },
++static const struct NuttX_symbol_list NuttX_symbol_list[NuttX_VAL_LAST+1] = { NUTTX_SYM_ENTRIES };
++#undef NUTTX_SYM_ENTRY
++
++#define NUTTX_SYMBOL_LIST_COUNT ARRAY_SIZE(NuttX_symbol_list)
++
++struct NuttX_task_list {
++	enum NuttX_symbol_values sym_val;
++	const char *state_name;
++};
++
++/* symbols that correspond to a task list with a thread state */
++static const struct NuttX_task_list NuttX_task_lists[] = {
++	{ NuttX_VAL_g_pendingtasks,          NUTTX_TSTATE_TASK_PENDING_STRZ    },
++	{ NuttX_VAL_g_readytorun,            NUTTX_TSTATE_TASK_READYTORUN_STRZ },
++	{ NuttX_VAL_g_inactivetasks,         NUTTX_TSTATE_TASK_INACTIVE_STRZ   },
++	{ NuttX_VAL_g_waitingforsemaphore,   NUTTX_TSTATE_WAIT_SEM_STRZ        },
++	{ NuttX_VAL_g_waitingforsignal,      NUTTX_TSTATE_WAIT_SIG_STRZ        },
++	{ NuttX_VAL_g_waitingformqnotempty,  NUTTX_TSTATE_WAIT_MQNOTEMPTY_STRZ },
++	{ NuttX_VAL_g_waitingformqnotfull,   NUTTX_TSTATE_WAIT_MQNOTFULL_STRZ  },
++	{ NuttX_VAL_g_waitingforfill,        NUTTX_TSTATE_WAIT_PAGEFILL_STRZ   },
++};
++
++const struct rtos_type NuttX_rtos = {
++	.name = "NuttX",
++
++	.detect_rtos = NuttX_detect_rtos,
++	.create = NuttX_create,
++	.update_threads = NuttX_update_threads,
++	.get_thread_reg_list = NuttX_get_thread_reg_list,
++	.get_symbol_list_to_lookup = NuttX_get_symbol_list_to_lookup,
++	.wipe = NuttX_wipe,
++};
++
++static int NuttX_wipe(struct rtos *rtos)
++{
++	int retval = ERROR_FAIL;
++	uint8_t zeros[4] = { 0, 0, 0, 0 };
++	symbol_table_elem_t *sym = rtos->symbols;
++	while (sym->symbol_name != NULL) {
++		if (sym->address == 0)
++		{
++			if (sym->optional)
++			{
++				LOG_DEBUG("No address available for variable %s - not wiping", sym->symbol_name);
++				sym++;
++				continue;
++			}
++			LOG_ERROR("Unable to wipe mandatory variable: %s - address unknown", sym->symbol_name);
++			return ERROR_FAIL;
++		}
++
++		/* Lookup variable in local symbol list. */
++		const struct NuttX_symbol_list *symlist = NuttX_symbol_list;
++		for (symlist = NuttX_symbol_list;
++		     symlist->name != sym->symbol_name && symlist->name != NULL;
++		     symlist++);
++
++		if (symlist->name == NULL) {
++			LOG_ERROR("Symbol look-up failed for variable %s", sym->symbol_name);
++			return retval;
++		}
++
++		if (symlist->wipe == false) {
++			LOG_DEBUG("Skipping wipe of variable %s", sym->symbol_name);
++			sym++;
++			continue;
++		}
++
++		retval = target_write_buffer(rtos->target, sym->address, 4, zeros);
++		if (retval != ERROR_OK)
++		{
++			LOG_ERROR("Write failure during wipe of variable: %s at 0x%" PRIx64, sym->symbol_name, sym->address);
++			return retval;
++		}
++		LOG_DEBUG("Wiped rtos variable: %s at 0x%" PRIx64, sym->symbol_name, sym->address);
++		sym++;
++	}
++	return retval;
++}
++
++static int NuttX_update_dsb(struct rtos *rtos)
++{
++	int retval;
++	struct NuttX_params *param;
++	struct NuttX_dsb *dsb;
++
++	param = (struct NuttX_params *) rtos->rtos_specific_params;
++
++	/* Free existing memory description.*/
++	if (param->dsb) {
++		free(param->dsb);
++		param->dsb = NULL;
++	}
++
++	dsb = malloc(sizeof(*dsb));
++	if (dsb == NULL) {
++		LOG_ERROR("Could not allocate space for NuttX debug signature block");
++		return -1;
++	}
++
++	retval = target_read_buffer(rtos->target,
++								rtos->symbols[NuttX_VAL_g_dsb].address,
++								sizeof(*dsb),
++								(uint8_t *) dsb);
++	if (retval != ERROR_OK) {
++		LOG_ERROR("Could not read NuttX debug signature block from target");
++		goto errfree;
++	}
++
++	if (strncmp(dsb->magic, NUTTX_MAGIC, 4) != 0) {
++		LOG_ERROR("Debug signature block does not contain magic bytes.");
++		goto errfree;
++	}
++
++	if (dsb->size < sizeof(*dsb)) {
++		LOG_ERROR("NuttX debug signature block claims to be smaller than expected");
++		goto errfree;
++	}
++
++	if (dsb->size > sizeof(*dsb)) {
++		LOG_WARNING("NuttX debug signature block claims to be bigger than"
++					" expected. Assuming compatibility...");
++	}
++
++	param->dsb = dsb;
++	return 0;
++
++errfree:
++	/* Error reading the NuttX debug signature block structure */
++	free(dsb);
++	param->dsb= NULL;
++	return -1;
++}
++
++static int NuttX_update_threads(struct rtos *rtos)
++{
++	int retval;
++	int tasks_found = 0;
++	int thread_list_size = 0;
++	const struct NuttX_params *param;
++	unsigned i;
++
++	if (rtos == NULL)
++		return -1;
++
++	if (rtos->rtos_specific_params == NULL)
++		return -3;
++
++	param = (const struct NuttX_params *) rtos->rtos_specific_params;
++
++	if (rtos->symbols == NULL) {
++		LOG_ERROR("No symbols for NuttX");
++		return -4;
++	}
++
++	/* Update the memory signature saved in the target memory */
++	if (param->dsb == NULL) {
++		retval = NuttX_update_dsb(rtos);
++		if (retval != ERROR_OK) {
++			LOG_ERROR("Reading the debug signature block of NuttX failed");
++			return retval;
++		}
++	}
++
++	/* wipe out previous thread details if any */
++	rtos_free_threadlist(rtos);
++
++	/* Count threads by iterating task lists.
++	 * Needed to allocate the task_detail array.
++	*/
++	rtos->current_thread = 0; /* Clear all 64 bits since read does not set them */
++	for (i = 0; i < ARRAY_SIZE(NuttX_task_lists); i++) {
++		const struct NuttX_task_list *task_list = &NuttX_task_lists[i];
++
++		/* retrieve queue pointer from symbol lookup */
++		const int64_t queue_ptr = rtos->symbols[task_list->sym_val].address;
++
++		/* no task queue here; try next */
++		if (queue_ptr == 0)
++			continue;
++
++		/* get tcb head pointer */
++		int64_t tcb_ptr = 0;
++		retval = target_read_buffer(rtos->target,
++				queue_ptr + NUTTX_DB_QUEUE_S_HEAD_OFFSET,
++				param->pointer_width,
++				(uint8_t *)&tcb_ptr);
++		if (retval != ERROR_OK) {
++			LOG_ERROR("Could not read NuttX tcb head pointer from target");
++			return retval;
++		}
++		LOG_DEBUG("NuttX: %s->head = 0x%" PRIx64, NuttX_symbol_list[task_list->sym_val].name, tcb_ptr);
++
++		/* The current thread is the head of the readytorun
++		 * list; record it.
++		 */
++		if (task_list->sym_val == NuttX_VAL_g_readytorun) {
++			rtos->current_thread = tcb_ptr;
++		}
++
++		/* commence counting tasks in tcb list */
++		while (tcb_ptr != 0)
++		{
++			/* count this tcb as a task */
++			thread_list_size++;
++
++			/* read next */
++			retval = target_read_buffer(rtos->target,
++					tcb_ptr + NUTTX_TCB_S_FLINK_OFFSET,
++					param->pointer_width,
++					(uint8_t *)&tcb_ptr);
++			if (retval != ERROR_OK) {
++				LOG_ERROR("Could not read NuttX tcb flink pointer from target");
++				return retval;
++			}
++			LOG_DEBUG("NuttX: tcb next pointer addr is 0x%" PRIx64, tcb_ptr );
++		}
++	}
++
++	LOG_DEBUG("NuttX: Current thread is 0x%" PRIx64 ", list size is %d", rtos->current_thread, thread_list_size);
++
++	if ((thread_list_size  == 0) || (rtos->current_thread == 0)) {
++		/* Either : No RTOS threads - there is always at least the current execution though */
++		/* OR     : No current thread - all threads suspended - show the current execution
++		 * of idling */
++		char tmp_str[] = "Current Execution";
++		thread_list_size++;
++		tasks_found++;
++		rtos->thread_details = malloc(
++				sizeof(struct thread_detail) * thread_list_size);
++		rtos->current_thread = RTOS_NO_CURRENT_THREAD;
++		rtos->thread_details->threadid = RTOS_NO_CURRENT_THREAD;
++		rtos->thread_details->exists = true;
++		rtos->thread_details->display_str = NULL;
++		rtos->thread_details->extra_info_str = NULL;
++		rtos->thread_details->thread_name_str = malloc(sizeof(tmp_str));
++		strcpy(rtos->thread_details->thread_name_str, tmp_str);
++
++		LOG_DEBUG("NuttX: No RTOS threads or no current thread" );
++
++		if (thread_list_size == 1) {
++			rtos->thread_count = 1;
++			return ERROR_OK;
++		}
++	} else {
++		/* create space for new thread details */
++		rtos->thread_details = malloc(
++				sizeof(struct thread_detail) * thread_list_size);
++	}
++
++	/* re-iterate tcbs but now fill-in the details  */
++	for (i = 0; i < ARRAY_SIZE(NuttX_task_lists); i++) {
++		const struct NuttX_task_list *task_list = &NuttX_task_lists[i];
++
++		/* retrieve queue pointer from symbol lookup */
++		const int64_t queue_ptr = rtos->symbols[task_list->sym_val].address;
++
++		/* no task queue here; try next */
++		if (queue_ptr == 0)
++			continue;
++
++		/* get tcb head pointer */
++		int64_t tcb_ptr = 0;
++		retval = target_read_buffer(rtos->target,
++				queue_ptr + NUTTX_DB_QUEUE_S_HEAD_OFFSET,
++				param->pointer_width,
++				(uint8_t *)&tcb_ptr);
++		if (retval != ERROR_OK) {
++			LOG_ERROR("Could not read NuttX tcb head pointer from target");
++			return retval;
++		}
++
++		/* iterate the task list */
++		while (tcb_ptr != 0 && tasks_found < thread_list_size) {
++			#define NUTTX_THREAD_NAME_STR_SIZE (200)
++			char tmp_str[NUTTX_THREAD_NAME_STR_SIZE];
++
++			LOG_DEBUG("NuttX: Reading thread 0x%" PRIx64, tcb_ptr);
++
++			/* Save the thread pointer */
++			rtos->thread_details[tasks_found].threadid = tcb_ptr;
++
++			if (param->dsb->tcb_s_name_ofs != 0) {
++				/* Read the thread name */
++				retval = target_read_buffer(rtos->target,
++						tcb_ptr + param->dsb->tcb_s_name_ofs,
++						NUTTX_THREAD_NAME_STR_SIZE,
++						(uint8_t *)&tmp_str);
++				if (retval != ERROR_OK) {
++					LOG_ERROR("Error reading thread name from NuttX target");
++					return retval;
++				}
++				tmp_str[NUTTX_THREAD_NAME_STR_SIZE-1] = '\x00';
++			} else {
++				tmp_str[0] = '\x00';
++			}
++
++			if (tmp_str[0] == '\x00')
++				strcpy(tmp_str, "No Name");
++
++			LOG_DEBUG("NuttX: Thread 0x%" PRIx64 " Name: %s", tcb_ptr, tmp_str);
++
++			rtos->thread_details[tasks_found].thread_name_str =
++				malloc(strlen(tmp_str)+1);
++			strcpy(rtos->thread_details[tasks_found].thread_name_str, tmp_str);
++
++			const char *state_desc;
++			if (task_list->sym_val == NuttX_VAL_g_readytorun && tcb_ptr == rtos->current_thread) {
++				state_desc = NUTTX_TSTATE_TASK_RUNNING_STRZ;
++			} else {
++				state_desc = task_list->state_name;
++			}
++
++			LOG_DEBUG("NuttX: Thread 0x%" PRIx64 " State: %s", tcb_ptr, state_desc);
++
++			rtos->thread_details[tasks_found].extra_info_str = malloc(strlen(
++						state_desc)+1);
++			strcpy(rtos->thread_details[tasks_found].extra_info_str, state_desc);
++
++			rtos->thread_details[tasks_found].exists = true;
++
++			rtos->thread_details[tasks_found].display_str = NULL;
++
++			tasks_found++;
++
++			/* Get the location of the next thread structure. */
++			retval = target_read_buffer(rtos->target,
++					tcb_ptr + NUTTX_TCB_S_FLINK_OFFSET,
++					param->pointer_width,
++					(uint8_t *) &tcb_ptr);
++			if (retval != ERROR_OK) {
++				LOG_ERROR("Error reading next tcb pointer in NuttX thread list");
++				return retval;
++			}
++		}
++	}
++
++	rtos->thread_count = tasks_found;
++
++	return 0;
++}
++
++static int NuttX_get_thread_reg_list(struct rtos *rtos, int64_t thread_id, char **hex_reg_list)
++{
++	const struct NuttX_params *param;
++
++	*hex_reg_list = NULL;
++
++	if (rtos == NULL)
++		return -1;
++
++	if (thread_id == 0)
++		return -2;
++
++	if (rtos->rtos_specific_params == NULL)
++		return -3;
++
++	param = (const struct NuttX_params *) rtos->rtos_specific_params;
++
++	int64_t xcp_ptr = thread_id + param->dsb->tcb_s_xcp_reg_ofs;
++	LOG_DEBUG("NuttX: tcb registers at 0x%" PRIx64, xcp_ptr);
++
++
++	return rtos_generic_stack_read(rtos->target, param->stacking_info, xcp_ptr, hex_reg_list);
++}
++
++static int NuttX_get_symbol_list_to_lookup(symbol_table_elem_t *symbol_list[])
++{
++	unsigned int i;
++	*symbol_list = calloc(
++			NUTTX_SYMBOL_LIST_COUNT, sizeof(symbol_table_elem_t));
++
++	for (i = 0; i < NUTTX_SYMBOL_LIST_COUNT; i++) {
++		symbol_table_elem_t *elem = &(*symbol_list)[i];
++		elem->symbol_name = NuttX_symbol_list[i].name;
++		elem->optional = NuttX_symbol_list[i].optional;
++	}
++
++	return 0;
++}
++
++static int NuttX_detect_rtos(struct target *target)
++{
++	if (target->rtos->symbols == NULL)
++	{
++		LOG_ERROR("Null Symbol list");
++		return 0;
++	}
++
++	for (symbol_table_elem_t *s = target->rtos->symbols; s->symbol_name; ++s) {
++		if ((!s->optional) && (s->address == 0))
++		{
++			LOG_DEBUG("No address for mandatory NuttX symbol %s - not detecting NuttX", s->symbol_name);
++			return 0;
++		}
++	}
++	/* All mandatory symbols are available - looks like NuttX */
++	return 1;
++}
++
++static int NuttX_create(struct target *target)
++{
++	int i = 0;
++	while ((i < NUTTX_NUM_PARAMS) &&
++			(0 != strcmp(NuttX_params_list[i].target_name, target->type->name))) {
++		i++;
++	}
++	if (i >= NUTTX_NUM_PARAMS) {
++		LOG_ERROR("Could not find target in NuttX compatibility list");
++		return -1;
++	}
++
++	target->rtos->rtos_specific_params = (void *) &NuttX_params_list[i];
++	target->rtos->current_thread = 0;
++	target->rtos->thread_details = NULL;
++	return 0;
++}
+diff --git a/src/rtos/rtos.c b/src/rtos/rtos.c
+index c96229c..f1ce017 100644
+--- a/src/rtos/rtos.c
++++ b/src/rtos/rtos.c
+@@ -36,6 +36,7 @@ extern struct rtos_type Linux_os;
+ extern struct rtos_type ChibiOS_rtos;
+ extern struct rtos_type embKernel_rtos;
+ extern struct rtos_type mqx_rtos;
++extern struct rtos_type NuttX_rtos;
+ 
+ static struct rtos_type *rtos_types[] = {
+ 	&ThreadX_rtos,
+@@ -45,6 +46,7 @@ static struct rtos_type *rtos_types[] = {
+ 	&ChibiOS_rtos,
+ 	&embKernel_rtos,
+ 	&mqx_rtos,
++	&NuttX_rtos,
+ 	NULL
+ };
+ 
+diff --git a/src/rtos/rtos_nuttx_stackings.c b/src/rtos/rtos_nuttx_stackings.c
+new file mode 100644
+index 0000000..7e985c6
+--- /dev/null
++++ b/src/rtos/rtos_nuttx_stackings.c
+@@ -0,0 +1,53 @@
++/***************************************************************************
++ *   Copyright (C) 2016 by Broadcom Corporation                            *
++ *   Ted Carter - tcarter@broadcom.com                                     *
++ *                                                                         *
++ *   This program is free software; you can redistribute it and/or modify  *
++ *   it under the terms of the GNU General Public License as published by  *
++ *   the Free Software Foundation; either version 2 of the License, or     *
++ *   (at your option) any later version.                                   *
++ *                                                                         *
++ *   This program is distributed in the hope that it will be useful,       *
++ *   but WITHOUT ANY WARRANTY; without even the implied warranty of        *
++ *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the         *
++ *   GNU General Public License for more details.                          *
++ *                                                                         *
++ *   You should have received a copy of the GNU General Public License     *
++ *   along with this program; if not, write to the                         *
++ *   Free Software Foundation, Inc.,                                       *
++ *   51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.           *
++ ***************************************************************************/
++
++#ifdef HAVE_CONFIG_H
++#include "config.h"
++#endif
++
++#include "rtos.h"
++
++static const struct stack_register_offset nuttx_Cortex_R4_stack_offsets[] = {
++	{ REGISTER_NOT_STACKED,        32 },		/* r0  (a1) */
++	{ REGISTER_NOT_STACKED,        32 },		/* r1  (a2) */
++	{ REGISTER_NOT_STACKED,        32 },		/* r2  (a3) */
++	{ REGISTER_NOT_STACKED,        32 },		/* r3  (a4) */
++	{ 0x10,                        32 },		/* r4  (v1) */
++	{ 0x14,                        32 },		/* r5  (v2) */
++	{ 0x18,                        32 },		/* r6  (v3) */
++	{ 0x1C,                        32 },		/* r7  (v4) */
++	{ 0x20,                        32 },		/* r8  (a1) */
++	{ 0x24,                        32 },		/* r9  (sb) */
++	{ 0x28,                        32 },		/* r10 (sl) */
++	{ 0x2C,                        32 },		/* r11 (fp) */
++	{ REGISTER_NOT_STACKED,        32 },		/* r12 (ip) */
++	{ 0x34,                        32 },		/* sp       */
++	{ 0x3C,                        32 },		/* lr       */
++	{ 0x3C,                        32 },		/* pc       */
++	{ 0x40,                        32 },		/* SPSR     */
++};
++
++const struct rtos_register_stacking nuttx_Cortex_R4_stacking = {
++	0x44,							/* stack_registers_size */
++	-1,								/* stack_growth_direction */
++	17,								/* num_output_registers */
++	NULL,							/* stack_alignment */
++	nuttx_Cortex_R4_stack_offsets	/* register_offsets */
++};
+diff --git a/src/rtos/rtos_nuttx_stackings.h b/src/rtos/rtos_nuttx_stackings.h
+new file mode 100644
+index 0000000..d705f0e
+--- /dev/null
++++ b/src/rtos/rtos_nuttx_stackings.h
+@@ -0,0 +1,32 @@
++/***************************************************************************
++ *   Copyright (C) 2016 by Broadcom Corporation                            *
++ *   Ted Carter - tcarter@broadcom.com                                     *
++ *                                                                         *
++ *   This program is free software; you can redistribute it and/or modify  *
++ *   it under the terms of the GNU General Public License as published by  *
++ *   the Free Software Foundation; either version 2 of the License, or     *
++ *   (at your option) any later version.                                   *
++ *                                                                         *
++ *   This program is distributed in the hope that it will be useful,       *
++ *   but WITHOUT ANY WARRANTY; without even the implied warranty of        *
++ *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the         *
++ *   GNU General Public License for more details.                          *
++ *                                                                         *
++ *   You should have received a copy of the GNU General Public License     *
++ *   along with this program; if not, write to the                         *
++ *   Free Software Foundation, Inc.,                                       *
++ *   51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.           *
++ ***************************************************************************/
++
++#ifndef INCLUDED_RTOS_NUTTX_STACKINGS_H_
++#define INCLUDED_RTOS_NUTTX_STACKINGS_H_
++
++#ifdef HAVE_CONFIG_H
++#include "config.h"
++#endif
++
++#include "rtos.h"
++
++extern const struct rtos_register_stacking nuttx_Cortex_R4_stacking;
++
++#endif	/* ifndef INCLUDED_RTOS_NUTTX_STACKINGS_H_ */
+-- 
+1.9.5.msysgit.0
+

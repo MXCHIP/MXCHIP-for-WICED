@@ -1,0 +1,39 @@
+From 7af6cc5795b79e8c7bbe828a161713741c3e1101 Mon Sep 17 00:00:00 2001
+From: Broadcom Wiced <broadcom_wiced@broadcom.local>
+Date: Thu, 7 Apr 2016 10:27:21 -0700
+Subject: [PATCH] Fix Cortex-A step logic when polling for halt.
+
+Polling for TARGET_HALTED in Cortex-A's step function favors generating
+a timeout error even when cortex_a_poll is has determined the state to
+be halted.  This happens because cortex_a_poll processing time exceeds
+the timeout value.  Since the only condition check following cortex_a_poll
+is timeout, it will report timeout instead.
+
+There may be other lurking issues here.  For example.
+- Does the step breakpoint get freed on error?
+- Why is cortex_a_poll processing take so much time?
+---
+ src/target/cortex_a.c | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/src/target/cortex_a.c b/src/target/cortex_a.c
+index c8d3036..79cfaa4 100644
+--- a/src/target/cortex_a.c
++++ b/src/target/cortex_a.c
+@@ -1469,10 +1469,12 @@ static int cortex_a_step(struct target *target, int current, uint32_t address,
+ 		return retval;
+ 
+ 	long long then = timeval_ms();
+-	while (target->state != TARGET_HALTED) {
++	while (1) {
+ 		retval = cortex_a_poll(target);
+ 		if (retval != ERROR_OK)
+ 			return retval;
++		if (target->state == TARGET_HALTED)
++			break;
+ 		if (timeval_ms() > then + 1000) {
+ 			LOG_ERROR("timeout waiting for target halt");
+ 			return ERROR_FAIL;
+-- 
+1.9.5.msysgit.0
+
