@@ -17,15 +17,20 @@ EXTRA_TARGET_MAKEFILES +=  $(MAKEFILES_PATH)/standard_platform_targets.mk
 
 VALID_BUSES := SDIO SPI
 
-ifeq ($(BUS),SDIO)
+# Set the WIFI firmware in multi application file system to point to firmware
+ifeq ($(NO_WIFI_FIRMWARE),)
+MULTI_APP_WIFI_FIRMWARE   := resources/firmware/$(WLAN_CHIP)/$(WLAN_CHIP)$(WLAN_CHIP_REVISION)$(WLAN_CHIP_BIN_TYPE).bin
+endif
+
 ifeq ($(MULTI_APP_WIFI_FIRMWARE),)
+ifeq ($(BUS),SDIO)
 GLOBAL_DEFINES          += WWD_DIRECT_RESOURCES
+endif
 else
 # Setting some internal build parameters
 WIFI_FIRMWARE           := $(MULTI_APP_WIFI_FIRMWARE)
 WIFI_FIRMWARE_LOCATION 	:= WIFI_FIRMWARE_IN_MULTI_APP
 GLOBAL_DEFINES          += WIFI_FIRMWARE_IN_MULTI_APP
-endif
 endif
 
 # Global includes
